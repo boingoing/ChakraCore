@@ -1128,4 +1128,11 @@
       <compile-flags>-args summary -endargs</compile-flags>
     </default>
   </test>
+  
+<test>
+    <default>
+        <files>module-syntax.js</files>
+        <compile-flags>-ES6Module -args summary -endargs</compile-flags>
+    </default>
+</test>
 </regress-exe>

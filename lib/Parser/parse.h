@@ -364,6 +364,7 @@ private:
     template <OpCode nop> ParseNodePtr CreateNodeWithScanner(charcount_t ichMin);
     ParseNodePtr CreateStrNodeWithScanner(IdentPtr pid);
     ParseNodePtr CreateIntNodeWithScanner(long lw);
+    ParseNodePtr CreateProgNodeWithScanner(bool isModuleSource);
 
     static void InitNode(OpCode nop,ParseNodePtr pnode);
     static void InitBlockNode(ParseNodePtr pnode, int blockId, PnodeBlockType blockType);
@@ -390,12 +391,15 @@ private:
         IdentPtr eval; // m_pidEval;
         IdentPtr setter; // m_pidSetter;
         IdentPtr getter; // m_pidGetter;
-        IdentPtr let; //m_pidLet;
-        IdentPtr constructor; //m_pidConstructor;
-        IdentPtr prototype; //m_pidPrototype;
+        IdentPtr let; // m_pidLet;
+        IdentPtr constructor; // m_pidConstructor;
+        IdentPtr prototype; // m_pidPrototype;
         IdentPtr __proto__; // m_pid__proto__;
-        IdentPtr of; //m_pidOf;
+        IdentPtr of; // m_pidOf;
         IdentPtr target; // m_pidTarget;
+        IdentPtr from; // m_pidFrom;
+        IdentPtr as; // m_pidAs;
+        IdentPtr default; // m_pidDefault
     };
 
     WellKnownPropertyPids wellKnownPropertyPids;
@@ -504,6 +508,26 @@ private:
             PushDynamicBlock();
         }
     }
+
+public:
+    IdentPtrList* GetRequestedModulesList();
+    ModuleImportEntryList* GetModuleImportEntryList();
+    ModuleExportEntryList* GetModuleLocalExportEntryList();
+    ModuleExportEntryList* GetModuleIndirectExportEntryList();
+    ModuleExportEntryList* GetModuleStarExportEntryList();
+
+protected:
+    IdentPtrList* EnsureRequestedModulesList();
+    ModuleImportEntryList* EnsureModuleImportEntryList();
+    ModuleExportEntryList* EnsureModuleLocalExportEntryList();
+    ModuleExportEntryList* EnsureModuleIndirectExportEntryList();
+    ModuleExportEntryList* EnsureModuleStarExportEntryList();
+
+    void AddModuleImportEntry(ModuleImportEntryList* importEntryList, IdentPtr importName, IdentPtr localName, IdentPtr moduleRequest, ParseNodePtr declNode);
+    void AddModuleExportEntry(ModuleExportEntryList* exportEntryList, IdentPtr importName, IdentPtr localName, IdentPtr exportName, IdentPtr moduleRequest);
+    void AddModuleLocalExportEntry(ParseNodePtr varDeclNode);
+
+    ParseNodePtr CreateModuleImportDeclNode(IdentPtr pid);
 
 public:
     WellKnownPropertyPids* names(){ return &wellKnownPropertyPids; }
@@ -779,6 +803,16 @@ private:
         tokens metaParentKeyword,
         charcount_t ichMin,
         _Out_opt_ BOOL* pfCanAssign = nullptr);
+
+    bool IsImportOrExportStatementValidHere();
+
+    template<bool buildAST> ParseNodePtr ParseImportDeclaration();
+    template<bool buildAST> void ParseImportClause(ModuleImportEntryList* importEntryList, bool parsingAfterComma = false);
+
+    template<bool buildAST> ParseNodePtr ParseExportDeclaration();
+
+    template<bool buildAST> void ParseNamedImportOrExportClause(ModuleImportEntryList* importEntryList, ModuleExportEntryList* exportEntryList, bool isExportClause);
+    template<bool buildAST> IdentPtr ParseImportOrExportFromClause(bool throwIfNotFound);
 
     BOOL NodeIsIdent(ParseNodePtr pnode, IdentPtr pid);
     BOOL NodeIsEvalName(ParseNodePtr pnode);

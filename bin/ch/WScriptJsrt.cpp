@@ -91,7 +91,17 @@ JsValueRef __stdcall WScriptJsrt::QuitCallback(JsValueRef callee, bool isConstru
     ExitProcess(exitCode);
 }
 
+JsValueRef __stdcall WScriptJsrt::LoadModuleFileCallback(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState)
+{
+    return LoadScriptFileHelper(callee, arguments, argumentCount, true);
+}
+
 JsValueRef __stdcall WScriptJsrt::LoadScriptFileCallback(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState)
+{
+    return LoadScriptFileHelper(callee, arguments, argumentCount, false);
+}
+
+JsValueRef WScriptJsrt::LoadScriptFileHelper(JsValueRef callee, JsValueRef *arguments, unsigned short argumentCount, bool isSourceModule)
 {
     HRESULT hr = E_FAIL;
     JsValueRef returnValue = JS_INVALID_REFERENCE;
@@ -127,7 +137,7 @@ JsValueRef __stdcall WScriptJsrt::LoadScriptFileCallback(JsValueRef callee, bool
             }
             else
             {
-                returnValue = LoadScript(callee, fileName, fileNameLength, fileContent, scriptInjectType);
+                returnValue = LoadScript(callee, fileName, fileNameLength, fileContent, scriptInjectType, isSourceModule);
             }
         }
     }
@@ -184,7 +194,7 @@ JsValueRef __stdcall WScriptJsrt::LoadScriptCallback(JsValueRef callee, bool isC
         {
             IfJsrtErrorSetGo(ChakraRTInterface::JsStringToPointer(arguments[3], &fileName, &fileNameLength));
         }
-        returnValue = LoadScript(callee, fileName, fileNameLength, fileContent, scriptInjectType);
+        returnValue = LoadScript(callee, fileName, fileNameLength, fileContent, scriptInjectType, false);
     }
 
 Error:
@@ -205,7 +215,7 @@ Error:
     return returnValue;
 }
 
-JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCWSTR fileName, size_t fileNameLength, LPCWSTR fileContent, LPCWSTR scriptInjectType)
+JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCWSTR fileName, size_t fileNameLength, LPCWSTR fileContent, LPCWSTR scriptInjectType, bool isSourceModule)
 {
     HRESULT hr = E_FAIL;
     JsErrorCode errorCode = JsNoError;
@@ -237,7 +247,15 @@ JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCWSTR fileName, size_t f
         IfJsrtErrorSetGo(ChakraRTInterface::JsGetContextOfObject(callee, &calleeContext));
 
         IfJsrtErrorSetGo(ChakraRTInterface::JsSetCurrentContext(calleeContext));
-        errorCode = ChakraRTInterface::JsRunScript(fileContent, GetNextSourceContext(), fullPath, &returnValue);
+
+        if (isSourceModule)
+        {
+            errorCode = ChakraRTInterface::JsRunModule(fileContent, GetNextSourceContext(), fullPath, &returnValue);
+        }
+        else
+        {
+            errorCode = ChakraRTInterface::JsRunScript(fileContent, GetNextSourceContext(), fullPath, &returnValue);
+        }
 
         if (errorCode == JsNoError)
         {
@@ -257,7 +275,15 @@ JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCWSTR fileName, size_t f
         // Initialize the host objects
         Initialize();
 
-        errorCode = ChakraRTInterface::JsRunScript(fileContent, GetNextSourceContext(), fullPath, &returnValue);
+
+        if (isSourceModule)
+        {
+            errorCode = ChakraRTInterface::JsRunModule(fileContent, GetNextSourceContext(), fullPath, &returnValue);
+        }
+        else
+        {
+            errorCode = ChakraRTInterface::JsRunScript(fileContent, GetNextSourceContext(), fullPath, &returnValue);
+        }
 
         if (errorCode == JsNoError)
         {
@@ -434,6 +460,13 @@ bool WScriptJsrt::Initialize()
     IfJsrtErrorFail(ChakraRTInterface::JsGetPropertyIdFromName(loadScriptFileString, &loadScriptFilePropertyId), false);
     CreateNamedFunction(loadScriptFileString, LoadScriptFileCallback, &loadScriptFile);
     IfJsrtErrorFail(ChakraRTInterface::JsSetProperty(wscript, loadScriptFilePropertyId, loadScriptFile, true), false);
+
+    JsValueRef loadModuleFile;
+    const wchar_t* loadModuleFileString = L"LoadModuleFile";
+    JsPropertyIdRef loadModuleFilePropertyId;
+    IfJsrtErrorFail(ChakraRTInterface::JsGetPropertyIdFromName(loadModuleFileString, &loadModuleFilePropertyId), false);
+    CreateNamedFunction(loadModuleFileString, LoadModuleFileCallback, &loadModuleFile);
+    IfJsrtErrorFail(ChakraRTInterface::JsSetProperty(wscript, loadModuleFilePropertyId, loadModuleFile, true), false);
 
     JsValueRef loadScript;
     JsPropertyIdRef loadScriptName;
