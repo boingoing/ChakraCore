@@ -217,7 +217,8 @@ enum FunctionFlags
     ffIsAnonymous                      = 0x100000,
     ffUsesArgumentsObject              = 0x200000,
     ffDoScopeObjectCreation            = 0x400000,
-    ffIsParamAndBodyScopeMerged        = 0x800000
+    ffIsParamAndBodyScopeMerged        = 0x800000,
+    ffIsLambda                         = 0x1000000
 };
 
 // Kinds of constant
@@ -2025,6 +2026,7 @@ public:
             | (function->m_ChildCallsEval ? ffChildCallsEval : 0)
             | (function->m_hasReferenceableBuiltInArguments ? ffHasReferenceableBuiltInArguments : 0)
             | (function->m_isParamAndBodyScopeMerged ? ffIsParamAndBodyScopeMerged : 0)
+            | (function->IsLambda() ? ffIsLambda : 0)
             | (isAnonymous ? ffIsAnonymous : 0)
 #ifdef ASMJS_PLAT
             | (function->m_isAsmjsMode ? ffIsAsmJsMode : 0)
@@ -3750,6 +3752,7 @@ public:
             (*functionBody)->m_ChildCallsEval = (bitflags & ffChildCallsEval) ? true : false;
             (*functionBody)->m_hasReferenceableBuiltInArguments = (bitflags & ffHasReferenceableBuiltInArguments) ? true : false;
             (*functionBody)->m_isParamAndBodyScopeMerged = (bitflags & ffIsParamAndBodyScopeMerged) ? true : false;
+            //(*functionBody)->m_isLambda = (bitflags & ffIsLambda) ? true : false;
 #ifdef ASMJS_PLAT
             (*functionBody)->m_isAsmJsFunction = (bitflags & ffIsAsmJsFunction) ? true : false;
             (*functionBody)->m_isAsmjsMode = (bitflags & ffIsAsmJsMode) ? true : false;

@@ -1678,13 +1678,21 @@ ParseNodePtr Parser::ReferenceSpecialName(IdentPtr pid, charcount_t ichMin, char
     return pnode;
 }
 
+template<bool buildAST>
 void Parser::CreateSpecialSymbolDeclarations(ParseNodePtr pnodeFnc, bool isGlobal)
 {
+    if (!buildAST)
+    {
+        return;
+    }
+
     Assert(!(isGlobal && (this->m_grfscr & fscrEval)));
+
+    bool isLambda = pnodeFnc->sxFnc.IsLambda();
 
     // Create a 'this' symbol for global lambda, indirect eval, ordinary functions with references to 'this', and all class constructors.
     PidRefStack* ref = wellKnownPropertyPids._this->GetTopRef();
-    if (((pnodeFnc->sxFnc.IsLambda() && GetCurrentNonLambdaFunctionNode() == nullptr && !(this->m_grfscr & fscrEval)) || !pnodeFnc->sxFnc.IsLambda())
+    if (((isLambda && GetCurrentNonLambdaFunctionNode() == nullptr && !(this->m_grfscr & fscrEval)) || !isLambda)
         && ((ref && ref->GetScopeId() >= m_currentBlockInfo->pnodeBlock->sxBlock.blockId) || pnodeFnc->sxFnc.IsClassConstructor()))
     {
         // Insert the decl for 'this'
@@ -1698,7 +1706,7 @@ void Parser::CreateSpecialSymbolDeclarations(ParseNodePtr pnodeFnc, bool isGloba
     }
 
     // Global code and lambdas cannot have 'new.target' or 'super' bindings so don't bother
-    if (isGlobal || pnodeFnc->sxFnc.IsLambda())
+    if (isGlobal || isLambda)
     {
         return;
     }
@@ -5289,10 +5297,10 @@ bool Parser::ParseFncDeclHelper(ParseNodePtr pnodeFnc, LPCOLESTR pNameHint, usho
     }
 
     uint uDeferSave = m_grfscr & fscrDeferFncParse;
-    if (flags & (fFncNoName | fFncLambda))
+    if (flags & fFncNoName)
     {
         // Disable deferral on getter/setter or other construct with unusual text bounds
-        // (fFncNoName|fFncLambda) as these are usually trivial, and re-parsing is problematic.
+        // (fFncNoName) as these are usually trivial, and re-parsing is problematic.
         // NOTE: It is probably worth supporting these cases for memory and load-time purposes,
         // especially as they become more and more common.
         m_grfscr &= ~fscrDeferFncParse;
@@ -5317,8 +5325,7 @@ bool Parser::ParseFncDeclHelper(ParseNodePtr pnodeFnc, LPCOLESTR pNameHint, usho
         AnalysisAssert(isDeferredFnc || pnodeFnc);
         // These are the conditions that prohibit upfront deferral *and* redeferral.
         isTopLevelDeferredFunc =
-            (!fLambda
-             && pnodeFnc
+            (pnodeFnc
              && DeferredParse(pnodeFnc->sxFnc.functionId)
              && (!pnodeFnc->sxFnc.IsNested() || CONFIG_FLAG(DeferNested))
              && !m_InAsmMode
@@ -5488,7 +5495,7 @@ bool Parser::ParseFncDeclHelper(ParseNodePtr pnodeFnc, LPCOLESTR pNameHint, usho
             (
                 !PHASE_FORCE_RAW(Js::DeferParsePhase, m_sourceContextInfo->sourceContextId, pnodeFnc->sxFnc.functionId) ||
                 PHASE_FORCE_RAW(Js::ScanAheadPhase, m_sourceContextInfo->sourceContextId, pnodeFnc->sxFnc.functionId)
-            ))
+                ))
         {
             // Try to scan ahead to the end of the function. If we get there before we've scanned a minimum
             // number of tokens, don't bother deferring, because it's too small.
@@ -5543,10 +5550,10 @@ bool Parser::ParseFncDeclHelper(ParseNodePtr pnodeFnc, LPCOLESTR pNameHint, usho
             });
         }
 
-        if (isTopLevelDeferredFunc || (m_InAsmMode && m_deferAsmJs))
+        if (fLambda)
         {
 #ifdef ASMJS_PLAT
-            if (m_InAsmMode && fLambda)
+            if (m_InAsmMode && (isTopLevelDeferredFunc && m_deferAsmJs))
             {
                 // asm.js doesn't support lambda functions
                 Js::AsmJSCompiler::OutputError(m_scriptContext, _u("Lambda functions are not supported."));
@@ -5554,37 +5561,39 @@ bool Parser::ParseFncDeclHelper(ParseNodePtr pnodeFnc, LPCOLESTR pNameHint, usho
                 throw Js::AsmJsParseException();
             }
 #endif
-            AssertMsg(!fLambda, "Deferring function parsing of a function does not handle lambda syntax");
+        }
+
+        if (m_token.tk == tkRParen)
+        {
+            m_pscan->Scan();
+        }
+
+        if (fLambda)
+        {
+            BOOL hadNewLine = m_pscan->FHadNewLine();
+
+            // it can be the case we do not have a fat arrow here if there is a valid expression on the left hand side
+            // of the fat arrow, but that expression does not parse as a parameter list.  E.g.
+            //    a.x => { }
+            // Therefore check for it and error if not found.
+            ChkCurTok(tkDArrow, ERRnoDArrow);
+
+            // Newline character between arrow parameters and fat arrow is a syntax error but we want to check for
+            // this after verifying there was a => token. Otherwise we would throw the wrong error.
+            if (hadNewLine)
+            {
+                Error(ERRsyntax);
+            }
+        }
+
+        if (isTopLevelDeferredFunc || (m_InAsmMode && m_deferAsmJs))
+        {
             fDeferred = true;
 
-            this->ParseTopLevelDeferredFunc(pnodeFnc, pnodeFncSave, pNameHint);
+            this->ParseTopLevelDeferredFunc(pnodeFnc, pnodeFncSave, pNameHint, fLambda, pNeedScanRCurly);
         }
         else
         {
-            if (m_token.tk == tkRParen) // This might be false due to error recovery or lambda.
-            {
-                m_pscan->Scan();
-            }
-
-            if (fLambda)
-            {
-                BOOL hadNewLine = m_pscan->FHadNewLine();
-
-                // it can be the case we do not have a fat arrow here if there is a valid expression on the left hand side
-                // of the fat arrow, but that expression does not parse as a parameter list.  E.g.
-                //    a.x => { }
-                // Therefore check for it and error if not found.
-                // LS Mode : since this is a lambda we supposed to get the fat arrow, if not we will skip till we get that fat arrow.
-                ChkCurTok(tkDArrow, ERRnoDArrow);
-
-                // Newline character between arrow parameters and fat arrow is a syntax error but we want to check for
-                // this after verifying there was a => token. Otherwise we would throw the wrong error.
-                if (hadNewLine)
-                {
-                    Error(ERRsyntax);
-                }
-            }
-
             AnalysisAssert(pnodeFnc);
 
             // Shouldn't be any temps in the arg list.
@@ -5661,7 +5670,7 @@ bool Parser::ParseFncDeclHelper(ParseNodePtr pnodeFnc, LPCOLESTR pNameHint, usho
             UpdateArgumentsNode(pnodeFnc, argNode);
         }
 
-        CreateSpecialSymbolDeclarations(pnodeFnc, false);
+        CreateSpecialSymbolDeclarations<buildAST>(pnodeFnc, false);
 
         // Restore the lists of scopes that contain function expressions.
 
@@ -5829,7 +5838,7 @@ void Parser::UpdateCurrentNodeFunc(ParseNodePtr pnodeFnc, bool fLambda)
     }
 }
 
-void Parser::ParseTopLevelDeferredFunc(ParseNodePtr pnodeFnc, ParseNodePtr pnodeFncParent, LPCOLESTR pNameHint)
+void Parser::ParseTopLevelDeferredFunc(ParseNodePtr pnodeFnc, ParseNodePtr pnodeFncParent, LPCOLESTR pNameHint, bool fLambda, bool *pNeedScanRCurly)
 {
     // Parse a function body that is a transition point from building AST to doing fast syntax check.
 
@@ -5841,9 +5850,22 @@ void Parser::ParseTopLevelDeferredFunc(ParseNodePtr pnodeFnc, ParseNodePtr pnode
     // Put the scanner into "no hashing" mode.
     BYTE deferFlags = m_pscan->SetDeferredParse(TRUE);
 
-    m_pscan->Scan();
-
-    ChkCurTok(tkLCurly, ERRnoLcurly);
+    if (!fLambda)
+    {
+        ChkCurTok(tkLCurly, ERRnoLcurly);
+    }
+    else
+    {
+        // Lambda may consist of a single expression instead of a block
+        if (m_pscan->m_ptoken->tk == tkLCurly)
+        {
+            m_pscan->Scan();
+        }
+        else
+        {
+            *pNeedScanRCurly = false;
+        }
+    }
 
     ParseNodePtr *ppnodeVarSave = m_ppnodeVar;
 
@@ -5887,11 +5909,21 @@ void Parser::ParseTopLevelDeferredFunc(ParseNodePtr pnodeFnc, ParseNodePtr pnode
     }
     else
     {
-        ParseStmtList<false>(nullptr, nullptr, SM_DeferredParse, true /* isSourceElementList */);
+        if (fLambda && !*pNeedScanRCurly)
+        {
+            ParseExpressionLambdaBody<false>(pnodeFnc);
+        }
+        else
+        {
+            ParseStmtList<false>(nullptr, nullptr, SM_DeferredParse, true /* isSourceElementList */);
+        }
     }
 
-    pnodeFnc->ichLim = m_pscan->IchLimTok();
-    pnodeFnc->sxFnc.cbLim = m_pscan->IecpLimTok();
+    if (!fLambda || *pNeedScanRCurly)
+    {
+        pnodeFnc->ichLim = m_pscan->IchLimTok();
+        pnodeFnc->sxFnc.cbLim = m_pscan->IecpLimTok();
+    }
 
     m_ppnodeVar = ppnodeVarSave;
 
@@ -5899,7 +5931,10 @@ void Parser::ParseTopLevelDeferredFunc(ParseNodePtr pnodeFnc, ParseNodePtr pnode
     // Do this before we consume the next token.
     m_pscan->SetDeferredParseFlags(deferFlags);
 
-    ChkCurTokNoScan(tkRCurly, ERRnoRcurly);
+    if (*pNeedScanRCurly)
+    {
+        ChkCurTokNoScan(tkRCurly, ERRnoRcurly);
+    }
 
 #if DBG
     pnodeFnc->sxFnc.deferredParseNextFunctionId = *this->m_nextFunctionId;
@@ -6269,10 +6304,11 @@ void Parser::ParseNestedDeferredFunc(ParseNodePtr pnodeFnc, bool fLambda, bool *
         ParseStmtList<false>(nullptr, nullptr, SM_DeferredParse, true /* isSourceElementList */, detectStrictModeOn);
 
         ChkCurTokNoScan(tkRCurly, ERRnoRcurly);
+
+        pnodeFnc->ichLim = m_pscan->IchLimTok();
+        pnodeFnc->sxFnc.cbLim = m_pscan->IecpLimTok();
     }
 
-    pnodeFnc->ichLim = m_pscan->IchLimTok();
-    pnodeFnc->sxFnc.cbLim = m_pscan->IecpLimTok();
     if (*pStrictModeTurnedOn)
     {
         pnodeFnc->sxFnc.SetStrictMode(true);
@@ -6926,7 +6962,7 @@ ParseNodePtr Parser::GenerateEmptyConstructor(bool extends)
 
     FinishParseBlock(pnodeInnerBlock);
 
-    CreateSpecialSymbolDeclarations(pnodeFnc, false);
+    CreateSpecialSymbolDeclarations<buildAST>(pnodeFnc, false);
 
     FinishParseBlock(pnodeBlock);
 
@@ -6983,6 +7019,11 @@ void Parser::ParseExpressionLambdaBody(ParseNodePtr pnodeLambda)
 
         // Lambda's do not have arguments binding
         pnodeLambda->sxFnc.SetHasReferenceableBuiltInArguments(false);
+    }
+    else
+    {
+        pnodeLambda->ichLim = max(m_pscan->IchLimTokPrevious(), lastRParen);
+        pnodeLambda->sxFnc.cbLim = m_pscan->IecpLimTokPrevious();
     }
 }
 
@@ -7069,6 +7110,8 @@ void Parser::FinishFncNode(ParseNodePtr pnodeFnc)
     pnodeFnc->sxFnc.nestedCount = 0;
     m_pnestedCount = &pnodeFnc->sxFnc.nestedCount;
 
+    bool fLambda = pnodeFnc->sxFnc.IsLambda();
+
     // Cue up the parser to the start of the function body.
     if (pnodeFnc->sxFnc.pnodeName)
     {
@@ -7083,7 +7126,7 @@ void Parser::FinishFncNode(ParseNodePtr pnodeFnc)
             // Getter/setter. The node text starts with the name, so eat that.
             m_pscan->ScanNoKeywords();
         }
-        else
+        else if (!fLambda)
         {
             // Anonymous function. Skip any leading "("'s and "function".
             for (;;)
@@ -7161,8 +7204,14 @@ void Parser::FinishFncNode(ParseNodePtr pnodeFnc)
         }
     }
 
-    if (m_token.tk == tkRParen) // This might be false due to a lambda => token.
+    if (m_token.tk == tkRParen)
     {
+        m_pscan->Scan();
+    }
+
+    if (fLambda)
+    {
+        Assert(m_token.tk == tkDArrow);
         m_pscan->Scan();
     }
 
@@ -7173,7 +7222,16 @@ void Parser::FinishFncNode(ParseNodePtr pnodeFnc)
         ParseNodePtr* lastNodeRef = NULL;
         const charcount_t ichLim = pnodeFnc->ichLim;
         const size_t cbLim = pnodeFnc->sxFnc.cbLim;
-        this->FinishFncDecl(pnodeFnc, NULL, lastNodeRef);
+
+        // Lambda body might not be wrapped in curly braces
+        if (fLambda && m_token.tk != tkLCurly)
+        {
+            ParseExpressionLambdaBody<true>(pnodeFnc);
+        }
+        else
+        {
+            this->FinishFncDecl(pnodeFnc, NULL, lastNodeRef);
+        }
 
 #if DBG
         // The pnode extent may not match the original extent.
@@ -11161,7 +11219,7 @@ void Parser::FinishDeferredFunction(ParseNodePtr pnodeScopeList)
                 UpdateArgumentsNode(pnodeFnc, argNode);
             }
 
-            CreateSpecialSymbolDeclarations(pnodeFnc, false);
+            CreateSpecialSymbolDeclarations<true>(pnodeFnc, false);
 
             this->FinishParseBlock(pnodeBlock);
             if (pnodeFncExprBlock)
@@ -11467,7 +11525,7 @@ ParseNodePtr Parser::Parse(LPCUTF8 pszSrc, size_t offset, size_t length, charcou
     // Direct eval doesn't need to have special symbols created
     if (!(this->m_grfscr & fscrEval))
     {
-        CreateSpecialSymbolDeclarations(pnodeProg, true);
+        CreateSpecialSymbolDeclarations<true>(pnodeProg, true);
     }
 
     // Append an EndCode node.

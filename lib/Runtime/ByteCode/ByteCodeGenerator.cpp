@@ -1276,6 +1276,11 @@ FuncInfo * ByteCodeGenerator::StartBindFunction(const char16 *name, uint nameLen
             if (pnode->sxFnc.IsClassConstructor())
             {
                 attributes = (Js::FunctionInfo::Attributes)(attributes | Js::FunctionInfo::Attributes::ClassConstructor);
+
+                if (pnode->sxFnc.IsBaseClassConstructor())
+                {
+                    attributes = (Js::FunctionInfo::Attributes)(attributes | Js::FunctionInfo::Attributes::BaseConstructorKind);
+                }
             }
             else
             {
