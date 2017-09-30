@@ -5341,7 +5341,7 @@ bool Parser::ParseFncDeclHelper(ParseNodePtr pnodeFnc, LPCOLESTR pNameHint, usho
         // These are heuristic conditions that prohibit upfront deferral but not redeferral.
         isTopLevelDeferredFunc = isTopLevelDeferredFunc && !isDeferredFnc && 
             (!isLikelyIIFE || !topLevelStmt || PHASE_FORCE_RAW(Js::DeferParsePhase, m_sourceContextInfo->sourceContextId, pnodeFnc->sxFnc.functionId));
-;
+
         if (!fLambda &&
             !isDeferredFnc &&
             !isLikelyIIFE &&
@@ -5645,13 +5645,10 @@ bool Parser::ParseFncDeclHelper(ParseNodePtr pnodeFnc, LPCOLESTR pNameHint, usho
 
                 if (m_token.tk != tkLCurly && fLambda)
                 {
-                    ParseExpressionLambdaBody<true>(pnodeFnc);
                     *pNeedScanRCurly = false;
                 }
-                else
-                {
-                    this->FinishFncDecl(pnodeFnc, pNameHint, lastNodeRef, skipFormals);
-                }
+                this->FinishFncDecl(pnodeFnc, pNameHint, lastNodeRef, fLambda, skipFormals);
+
                 m_currDeferredStub = saveCurrentStub;
             }
             else
@@ -7223,15 +7220,7 @@ void Parser::FinishFncNode(ParseNodePtr pnodeFnc)
         const charcount_t ichLim = pnodeFnc->ichLim;
         const size_t cbLim = pnodeFnc->sxFnc.cbLim;
 
-        // Lambda body might not be wrapped in curly braces
-        if (fLambda && m_token.tk != tkLCurly)
-        {
-            ParseExpressionLambdaBody<true>(pnodeFnc);
-        }
-        else
-        {
-            this->FinishFncDecl(pnodeFnc, NULL, lastNodeRef);
-        }
+        this->FinishFncDecl(pnodeFnc, NULL, lastNodeRef, fLambda);
 
 #if DBG
         // The pnode extent may not match the original extent.
@@ -7264,7 +7253,7 @@ void Parser::FinishFncNode(ParseNodePtr pnodeFnc)
     m_pscan->SetAwaitIsKeywordRegion(fPreviousAwaitIsKeyword);
 }
 
-void Parser::FinishFncDecl(ParseNodePtr pnodeFnc, LPCOLESTR pNameHint, ParseNodePtr *lastNodeRef, bool skipCurlyBraces)
+void Parser::FinishFncDecl(ParseNodePtr pnodeFnc, LPCOLESTR pNameHint, ParseNodePtr *lastNodeRef, bool fLambda, bool skipCurlyBraces)
 {
     LPCOLESTR name = NULL;
     JS_ETW(int32 startAstSize = *m_pCurrentAstSize);
@@ -7284,22 +7273,29 @@ void Parser::FinishFncDecl(ParseNodePtr pnodeFnc, LPCOLESTR pNameHint, ParseNode
 
     Assert(pnodeFnc->nop == knopFncDecl);
 
-    if (!skipCurlyBraces)
+    if (fLambda && m_token.tk != tkLCurly)
     {
-        ChkCurTok(tkLCurly, ERRnoLcurly);
+        ParseExpressionLambdaBody<true>(pnodeFnc);
     }
-
-    ParseStmtList<true>(&pnodeFnc->sxFnc.pnodeBody, &lastNodeRef, SM_OnFunctionCode, true /* isSourceElementList */);
-    // Append an EndCode node.
-    AddToNodeList(&pnodeFnc->sxFnc.pnodeBody, &lastNodeRef, CreateNodeWithScanner<knopEndCode>());
-
-    if (!skipCurlyBraces)
+    else
     {
-        ChkCurTokNoScan(tkRCurly, ERRnoRcurly);
-    }
+        if (!skipCurlyBraces)
+        {
+            ChkCurTok(tkLCurly, ERRnoLcurly);
+        }
 
-    pnodeFnc->ichLim = m_pscan->IchLimTok();
-    pnodeFnc->sxFnc.cbLim = m_pscan->IecpLimTok();
+        ParseStmtList<true>(&pnodeFnc->sxFnc.pnodeBody, &lastNodeRef, SM_OnFunctionCode, true /* isSourceElementList */);
+        // Append an EndCode node.
+        AddToNodeList(&pnodeFnc->sxFnc.pnodeBody, &lastNodeRef, CreateNodeWithScanner<knopEndCode>());
+
+        if (!skipCurlyBraces)
+        {
+            ChkCurTokNoScan(tkRCurly, ERRnoRcurly);
+        }
+
+        pnodeFnc->ichLim = m_pscan->IchLimTok();
+        pnodeFnc->sxFnc.cbLim = m_pscan->IecpLimTok();
+    }
 
 #ifdef ENABLE_JS_ETW
     int32 astSize = *m_pCurrentAstSize - startAstSize;
