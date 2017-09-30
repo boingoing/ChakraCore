@@ -7110,6 +7110,11 @@ CommonNumber:
                     ctorProtoObj->EnsureProperty(Js::PropertyIds::constructor);
                     ctorProtoObj->SetEnumerable(Js::PropertyIds::constructor, FALSE);
 
+                    if (ScriptFunctionBase::Is(constructor))
+                    {
+                        ScriptFunctionBase::FromVar(constructor)->GetFunctionInfo()->SetBaseConstructorKind();
+                    }
+
                     break;
                 }
 
