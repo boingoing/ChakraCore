@@ -1681,19 +1681,17 @@ ParseNodePtr Parser::ReferenceSpecialName(IdentPtr pid, charcount_t ichMin, char
 template<bool buildAST>
 void Parser::CreateSpecialSymbolDeclarations(ParseNodePtr pnodeFnc, bool isGlobal)
 {
-    if (!buildAST)
+    // Lambda function cannot have any special bindings.
+    if (!buildAST || pnodeFnc->sxFnc.IsLambda())
     {
         return;
     }
 
     Assert(!(isGlobal && (this->m_grfscr & fscrEval)));
 
-    bool isLambda = pnodeFnc->sxFnc.IsLambda();
-
-    // Create a 'this' symbol for global lambda, indirect eval, ordinary functions with references to 'this', and all class constructors.
+    // Create a 'this' symbol for indirect eval, non-lambda functions with references to 'this', and all class constructors.
     PidRefStack* ref = wellKnownPropertyPids._this->GetTopRef();
-    if (((isLambda && GetCurrentNonLambdaFunctionNode() == nullptr && !(this->m_grfscr & fscrEval)) || !isLambda)
-        && ((ref && ref->GetScopeId() >= m_currentBlockInfo->pnodeBlock->sxBlock.blockId) || pnodeFnc->sxFnc.IsClassConstructor()))
+    if ((ref && ref->GetScopeId() >= m_currentBlockInfo->pnodeBlock->sxBlock.blockId) || pnodeFnc->sxFnc.IsClassConstructor())
     {
         // Insert the decl for 'this'
         ParseNodePtr thisNode = this->CreateSpecialVarDeclNode(pnodeFnc, wellKnownPropertyPids._this);
@@ -1705,8 +1703,8 @@ void Parser::CreateSpecialSymbolDeclarations(ParseNodePtr pnodeFnc, bool isGloba
         }
     }
 
-    // Global code and lambdas cannot have 'new.target' or 'super' bindings so don't bother
-    if (isGlobal || isLambda)
+    // Global code cannot have 'new.target' or 'super' bindings so don't bother.
+    if (isGlobal)
     {
         return;
     }
@@ -11519,7 +11517,7 @@ ParseNodePtr Parser::Parse(LPCUTF8 pszSrc, size_t offset, size_t length, charcou
         Error(ERRsyntax);
 
     // Direct eval doesn't need to have special symbols created
-    if (!(this->m_grfscr & fscrEval))
+    if (!(this->m_grfscr & fscrEval) && !(m_parseType == ParseType_Deferred))
     {
         CreateSpecialSymbolDeclarations<true>(pnodeProg, true);
     }
