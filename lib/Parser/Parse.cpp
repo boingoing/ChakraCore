@@ -7183,10 +7183,10 @@ void Parser::FinishFncNode(ParseNodePtr pnodeFnc)
         Assert(pnodeFnc->sxFnc.IsGenerator());
         m_pscan->ScanNoKeywords();
     }
-    Assert(m_token.tk == tkLParen);
+    Assert(m_token.tk == tkLParen || (fLambda && m_token.tk == tkID));
     m_pscan->ScanNoKeywords();
 
-    if (m_token.tk != tkRParen)
+    if (m_token.tk != tkRParen && m_token.tk != tkDArrow)
     {
         for (;;)
         {
@@ -7228,14 +7228,8 @@ void Parser::FinishFncNode(ParseNodePtr pnodeFnc)
         }
     }
 
-    if (m_token.tk == tkRParen)
+    if (m_token.tk == tkRParen || (fLambda && m_token.tk == tkDArrow))
     {
-        m_pscan->Scan();
-    }
-
-    if (fLambda)
-    {
-        Assert(m_token.tk == tkDArrow);
         m_pscan->Scan();
     }
 
