@@ -7152,7 +7152,7 @@ void Parser::FinishFncNode(ParseNodePtr pnodeFnc)
         }
         else if (!fLambda)
         {
-            // Anonymous function. Skip any leading "("'s and "function".
+            // Anonymous function. Skip "async", "function", and '(' or '*' characters.
             for (;;)
             {
                 m_pscan->Scan();
@@ -7161,6 +7161,7 @@ void Parser::FinishFncNode(ParseNodePtr pnodeFnc)
                     Assert(pnodeFnc->sxFnc.IsAsync());
                     continue;
                 }
+                // Quit scanning ahead when we reach a 'function' keyword which precedes the arg list.
                 if (m_token.tk == tkFUNCTION)
                 {
                     break;
@@ -7173,14 +7174,18 @@ void Parser::FinishFncNode(ParseNodePtr pnodeFnc)
     // switch scanner to treat 'yield' as keyword in generator functions
     // or as an identifier in non-generator functions
     bool fPreviousYieldIsKeyword = m_pscan->SetYieldIsKeywordRegion(pnodeFnc && pnodeFnc->sxFnc.IsGenerator());
-
     bool fPreviousAwaitIsKeyword = m_pscan->SetAwaitIsKeywordRegion(pnodeFnc && pnodeFnc->sxFnc.IsAsync());
 
     // Skip the arg list.
-    m_pscan->ScanNoKeywords();
+    m_pscan->Scan();
     if (m_token.tk == tkStar)
     {
         Assert(pnodeFnc->sxFnc.IsGenerator());
+        m_pscan->ScanNoKeywords();
+    }
+    if (fLambda && m_token.tk == tkID && m_token.GetIdentifier(m_phtbl) == wellKnownPropertyPids.async)
+    {
+        Assert(pnodeFnc->sxFnc.IsAsync());
         m_pscan->ScanNoKeywords();
     }
     Assert(m_token.tk == tkLParen || (fLambda && m_token.tk == tkID));
@@ -7228,7 +7233,11 @@ void Parser::FinishFncNode(ParseNodePtr pnodeFnc)
         }
     }
 
-    if (m_token.tk == tkRParen || (fLambda && m_token.tk == tkDArrow))
+    if (m_token.tk == tkRParen)
+    {
+        m_pscan->Scan();
+    }
+    if (fLambda && m_token.tk == tkDArrow)
     {
         m_pscan->Scan();
     }
