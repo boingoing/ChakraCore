@@ -275,8 +275,6 @@ HRESULT Parser::ValidateSyntax(LPCUTF8 pszSrc, size_t encodedCharCount, bool isG
         m_inDeferredNestedFunc = false;
         m_deferringAST = true;
 
-
-
         m_nextBlockId = 0;
 
         ParseNode *pnodeFnc = CreateNode(knopFncDecl);
@@ -11516,12 +11514,88 @@ ParseNodePtr Parser::Parse(LPCUTF8 pszSrc, size_t offset, size_t length, charcou
     }
     else
     {
-        // Process a sequence of statements/declarations
-        ParseStmtList<true>(
-            &pnodeProg->sxFnc.pnodeBody,
-            &lastNodeRef,
-            SM_OnGlobalCode,
-            !(m_grfscr & fscrDeferredFncExpression) /* isSourceElementList */);
+        if (isDeferred)
+        {
+            // Defer parse for a single function should just parse that one function - there are no other statements.
+            ushort flags = fFncNoFlgs;
+            size_t iecpMin = 0;
+            charcount_t ichMin = 0;
+            bool isAsyncMethod = false;
+
+            // The top-level deferred function body was defined by a function expression whose parsing was deferred. We are now
+            // parsing it, so unset the flag so that any nested functions are parsed normally. This flag is only applicable the
+            // first time we see it.
+            //
+            // Normally, deferred functions will be parsed in ParseStatement upon encountering the 'function' token. The first
+            // token of the source code of the function may not be a 'function' token though, so we still need to reset this flag
+            // for the first function we parse. This can happen in compat modes, for instance, for a function expression enclosed
+            // in parentheses, where the legacy behavior was to include the parentheses in the function's source code.
+            if (m_grfscr & fscrDeferredFncExpression)
+            {
+                m_grfscr &= ~fscrDeferredFncExpression;
+            }
+            else
+            {
+                flags |= fFncDeclaration;
+            }
+
+            // There are three cases which can confirm async function:
+            //   async function...   -> async function
+            //   async (...          -> async lambda with parens around the formal parameter
+            //   async identifier... -> async lambda with single identifier parameter
+            if (m_token.tk == tkID && m_token.GetIdentifier(m_phtbl) == wellKnownPropertyPids.async && m_scriptContext->GetConfig()->IsES7AsyncAndAwaitEnabled())
+            {
+                ichMin = m_pscan->IchMinTok();
+                iecpMin = m_pscan->IecpMinTok();
+
+                // Keep state so we can rewind if it turns out that this isn't an async function.
+                // The only way this can happen is if we have a lambda with a single formal parameter named 'async' not enclosed by parens.
+                RestorePoint termStart;
+                m_pscan->Capture(&termStart);
+
+                m_pscan->Scan();
+                if ((m_token.tk == tkID || m_token.tk == tkLParen || m_token.tk == tkFUNCTION) && !m_pscan->FHadNewLine())
+                {
+                    flags |= fFncAsync;
+                    isAsyncMethod = true;
+                }
+                else
+                {
+                    m_pscan->SeekTo(termStart);
+                }
+            }
+
+            // If first token of the function is tkID or tkLParen, this is a lambda.
+            if (m_token.tk == tkID || m_token.tk == tkLParen)
+            {
+                flags |= fFncLambda;
+            }
+            else
+            {
+                // Must be ordinary function keyword - do not eat the token
+                ChkCurTokNoScan(tkFUNCTION, ERRsyntax);
+            }
+
+            ParseNodePtr pnodeFnc = ParseFncDecl<true>(flags, nullptr, false, false);
+            pnodeProg->sxFnc.pnodeBody = nullptr;
+            AddToNodeList(&pnodeProg->sxFnc.pnodeBody, &lastNodeRef, pnodeFnc);
+
+            // Include the async keyword in the function extents
+            if (isAsyncMethod)
+            {
+                pnodeFnc->sxFnc.cbMin = iecpMin;
+                pnodeFnc->ichMin = ichMin;
+            }
+        }
+        else
+        {
+            // Process a sequence of statements/declarations
+            ParseStmtList<true>(
+                &pnodeProg->sxFnc.pnodeBody,
+                &lastNodeRef,
+                SM_OnGlobalCode,
+                !(m_grfscr & fscrDeferredFncExpression) /* isSourceElementList */);
+        }
     }
 
     if (m_parseType == ParseType_Deferred)
