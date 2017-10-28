@@ -5056,24 +5056,21 @@ ParseNodePtr Parser::ParseFncDecl(ushort flags, LPCOLESTR pNameHint, const bool 
         GetCurrentFunctionNode()->sxFnc.SetChildCallsEval(true);
     }
 
-    ParseNodePtr pnodeFncParent = buildAST ? m_currentNodeFunc : m_currentNodeDeferredFunc;
-
     // Lambdas do not have "arguments" and instead capture their parent's
     // binding of "arguments.  To ensure the arguments object of the enclosing
     // non-lambda function is loaded propagate the UsesArguments flag up to
     // the parent function
-    if ((flags & fFncLambda) != 0)
+    if (fLambda && pnodeFnc->sxFnc.UsesArguments())
     {
-        if (pnodeFnc->sxFnc.UsesArguments())
+        ParseNodePtr pnodeFncParent = GetCurrentFunctionNode();
+
+        if (pnodeFncParent != nullptr)
         {
-            if (pnodeFncParent != nullptr)
-            {
-                pnodeFncParent->sxFnc.SetUsesArguments();
-            }
-            else
-            {
-                m_UsesArgumentsAtGlobal = true;
-            }
+            pnodeFncParent->sxFnc.SetUsesArguments();
+        }
+        else
+        {
+            m_UsesArgumentsAtGlobal = true;
         }
     }
 
