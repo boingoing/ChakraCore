@@ -4529,6 +4529,11 @@ ParseNodePtr Parser::ParseMemberList(LPCOLESTR pNameHint, uint32* pNameHintLengt
             {
                 Error(ERRsyntax);
             }
+
+            // Include star character in the function extents
+            ichMin = m_pscan->IchMinTok();
+            iecpMin = m_pscan->IecpMinTok();
+
             m_pscan->ScanForcingPid();
             fncDeclFlags |= fFncGenerator;
         }
@@ -4702,7 +4707,7 @@ ParseNodePtr Parser::ParseMemberList(LPCOLESTR pNameHint, uint32* pNameHintLengt
             ParseNodePtr pnodeFunc = ParseFncDecl<buildAST>(fncDeclFlags | (isAsyncMethod ? fFncAsync : fFncNoFlgs), pFullNameHint,
                 /*needsPIDOnRCurlyScan*/ false, /*resetParsingSuperRestrictionState*/ false);
 
-            if (isAsyncMethod)
+            if (isAsyncMethod || isGenerator)
             {
                 pnodeFunc->sxFnc.cbMin = iecpMin;
                 pnodeFunc->ichMin = ichMin;
@@ -5318,10 +5323,10 @@ bool Parser::ParseFncDeclHelper(ParseNodePtr pnodeFnc, LPCOLESTR pNameHint, usho
     }
 
     uint uDeferSave = m_grfscr & fscrDeferFncParse;
-    if (flags & fFncNoName)
+    if (flags & fFncClassMember)
     {
-        // Disable deferral on getter/setter or other construct with unusual text bounds
-        // (fFncNoName) as these are usually trivial, and re-parsing is problematic.
+        // Disable deferral on class members or other construct with unusual text bounds
+        // as these are usually trivial, and re-parsing is problematic.
         // NOTE: It is probably worth supporting these cases for memory and load-time purposes,
         // especially as they become more and more common.
         m_grfscr &= ~fscrDeferFncParse;
@@ -11518,6 +11523,8 @@ ParseNodePtr Parser::Parse(LPCUTF8 pszSrc, size_t offset, size_t length, charcou
             size_t iecpMin = 0;
             charcount_t ichMin = 0;
             bool isAsyncMethod = false;
+            bool isGenerator = false;
+            bool isMethod = false;
 
             // The top-level deferred function body was defined by a function expression whose parsing was deferred. We are now
             // parsing it, so unset the flag so that any nested functions are parsed normally. This flag is only applicable the
@@ -11536,22 +11543,35 @@ ParseNodePtr Parser::Parse(LPCUTF8 pszSrc, size_t offset, size_t length, charcou
                 flags |= fFncDeclaration;
             }
 
-            // There are three cases which can confirm async function:
-            //   async function...   -> async function
-            //   async (...          -> async lambda with parens around the formal parameter
-            //   async identifier... -> async lambda with single identifier parameter
+            if (m_grfscr & fscrDeferredFncIsMethod)
+            {
+                isMethod = true;
+                flags |= fFncNoName | fFncMethod;
+            }
+
+            // These are the cases which can confirm async function:
+            //   async function() {}         -> async function
+            //   async () => {}              -> async lambda with parens around the formal parameter
+            //   async arg => {}             -> async lambda with single identifier parameter
+            //   async name() {}             -> async method
+            //   async [computed_name]() {}  -> async method with a computed name
             if (m_token.tk == tkID && m_token.GetIdentifier(m_phtbl) == wellKnownPropertyPids.async && m_scriptContext->GetConfig()->IsES7AsyncAndAwaitEnabled())
             {
                 ichMin = m_pscan->IchMinTok();
                 iecpMin = m_pscan->IecpMinTok();
 
-                // Keep state so we can rewind if it turns out that this isn't an async function.
-                // The only way this can happen is if we have a lambda with a single formal parameter named 'async' not enclosed by parens.
+                // Keep state so we can rewind if it turns out that this isn't an async function:
+                //   async() {}              -> method named async
+                //   async => {}             -> lambda with single parameter named async
                 RestorePoint termStart;
                 m_pscan->Capture(&termStart);
 
                 m_pscan->Scan();
-                if ((m_token.tk == tkID || m_token.tk == tkLParen || m_token.tk == tkFUNCTION) && !m_pscan->FHadNewLine())
+                if ((m_token.tk == tkFUNCTION                // Regular function keyword after async is always async function
+                    || m_token.tk == tkID                    // Async keyword followed by identifier is always async function (either identifier is lambda parameter name or method name)
+                    || (m_token.tk == tkLParen && !isMethod) // Async keyword followed by ( is async function if this is not a method
+                    || m_token.tk == tkLBrack)               // We can only have a bracket in the case of method with computed name
+                    && !m_pscan->FHadNewLine())
                 {
                     flags |= fFncAsync;
                     isAsyncMethod = true;
@@ -11562,23 +11582,36 @@ ParseNodePtr Parser::Parse(LPCUTF8 pszSrc, size_t offset, size_t length, charcou
                 }
             }
 
-            // If first token of the function is tkID or tkLParen, this is a lambda.
-            if (m_token.tk == tkID || m_token.tk == tkLParen)
+            if (m_token.tk == tkStar && m_scriptContext->GetConfig()->IsES6GeneratorsEnabled())
             {
-                flags |= fFncLambda;
+                ichMin = m_pscan->IchMinTok();
+                iecpMin = m_pscan->IecpMinTok();
+
+                flags |= fFncGenerator;
+                isGenerator = true;
+
+                m_pscan->Scan();
             }
-            else
+
+            // Eat the computed name expression
+            if (m_token.tk == tkLBrack && isMethod)
             {
-                // Must be ordinary function keyword - do not eat the token
-                ChkCurTokNoScan(tkFUNCTION, ERRsyntax);
+                m_pscan->Scan();
+                ParseExpr<false>();
+            }
+
+            if (!isMethod && (m_token.tk == tkID || m_token.tk == tkLParen))
+            {
+                // If first token of the function is tkID or tkLParen, this is a lambda.
+                flags |= fFncLambda;
             }
 
             ParseNodePtr pnodeFnc = ParseFncDecl<true>(flags, nullptr, false, false);
             pnodeProg->sxFnc.pnodeBody = nullptr;
             AddToNodeList(&pnodeProg->sxFnc.pnodeBody, &lastNodeRef, pnodeFnc);
 
-            // Include the async keyword in the function extents
-            if (isAsyncMethod)
+            // Include the async keyword or star character in the function extents
+            if (isAsyncMethod || isGenerator)
             {
                 pnodeFnc->sxFnc.cbMin = iecpMin;
                 pnodeFnc->ichMin = ichMin;
