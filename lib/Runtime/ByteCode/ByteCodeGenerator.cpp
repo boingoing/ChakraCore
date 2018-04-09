@@ -2461,6 +2461,7 @@ FuncInfo* PreVisitFunction(ParseNodeFnc* pnodeFnc, ByteCodeGenerator* byteCodeGe
     FuncInfo* funcInfo = pnodeFnc->funcInfo = byteCodeGenerator->StartBindFunction(funcName, funcNameLength, functionNameOffset, &funcExprWithName, pnodeFnc, reuseNestedFunc);
     funcInfo->byteCodeFunction->SetIsNamedFunctionExpression(funcExprWithName);
     funcInfo->byteCodeFunction->SetIsNameIdentifierRef(pnodeFnc->isNameIdentifierRef);
+
     if (fIsRoot)
     {
         byteCodeGenerator->SetRootFuncInfo(funcInfo);
@@ -5173,6 +5174,7 @@ Js::FunctionBody * ByteCodeGenerator::MakeGlobalFunctionBody(ParseNode *pnode)
             );
 
     func->SetIsGlobalFunc(true);
+
     scriptContext->GetLibrary()->RegisterDynamicFunctionReference(func);
 
     return func;

@@ -1651,6 +1651,7 @@ namespace Js
     class ParseableFunctionInfo: public FunctionProxy
     {
         friend class ByteCodeBufferReader;
+        friend class ByteCodeBufferBuilder;
 
     public:
 
@@ -1950,7 +1951,7 @@ namespace Js
         FunctionProxy* GetNestedFunctionProxy(uint index);
         ParseableFunctionInfo* GetNestedFunctionForExecution(uint index);
         void SetNestedFunc(FunctionInfo* nestedFunc, uint index, uint32 flags);
-        void BuildDeferredStubs(ParseNode *pnodeFnc);
+        void BuildDeferredStubs(ParseNodeFnc* pnodeFnc);
         DeferredFunctionStub *GetDeferredStubs() const { return static_cast<DeferredFunctionStub *>(this->GetAuxPtr(AuxPointerType::DeferredStubs)); }
         void SetDeferredStubs(DeferredFunctionStub *stub) { this->SetAuxPtr(AuxPointerType::DeferredStubs, stub); }
         void RegisterFuncToDiag(ScriptContext * scriptContext, char16 const * pszTitle);
