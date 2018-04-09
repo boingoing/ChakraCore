@@ -1912,15 +1912,6 @@ namespace Js
         return this->m_displayName;
     }
 
-    void ParseableFunctionInfo::BuildDeferredStubs(ParseNode *pnodeFnc)
-    {
-        Assert(pnodeFnc->nop == knopFncDecl);
-
-        // TODO: Disabling the creation of deferred stubs for now. We need to rethink the design again as the current behavior
-        // is not usable with precise capturing.
-        this->SetDeferredStubs(nullptr);
-    }
-
     FunctionInfoArray ParseableFunctionInfo::GetNestedFuncArray()
     {
         Assert(GetNestedArray() != nullptr);

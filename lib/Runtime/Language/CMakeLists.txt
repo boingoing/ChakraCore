@@ -58,6 +58,7 @@ set(CRL_SOURCE_FILES ${CRL_SOURCE_FILES}
     SimdUint8x16OperationX86X64.cpp
     SimdUtils.cpp
     SourceDynamicProfileManager.cpp
+    SimpleDataCacheWrapper.cpp
     SourceTextModuleRecord.cpp
     StackTraceArguments.cpp
     TaggedInt.cpp

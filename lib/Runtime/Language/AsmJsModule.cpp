@@ -556,7 +556,7 @@ namespace Js
         {
             if (!PHASE_OFF1(Js::SkipNestedDeferredPhase))
             {
-                deferParseFunction->BuildDeferredStubs(fncNode);
+                deferParseFunction->SetDeferredStubs(fncNode->deferredStub);
             }
         }
         deferParseFunction->SetIsAsmjsMode(true);

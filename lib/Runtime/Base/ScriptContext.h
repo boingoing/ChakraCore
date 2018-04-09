@@ -19,6 +19,7 @@ using namespace PlatformAgnostic;
 class NativeCodeGenerator;
 class BackgroundParser;
 struct IActiveScriptDirect;
+
 namespace Js
 {
 #ifdef ENABLE_BASIC_TELEMETRY
@@ -33,6 +34,7 @@ namespace Js
     struct HaltCallback;
     struct DebuggerOptionsCallback;
     class ModuleRecordBase;
+    class SimpleDataCacheWrapper;
 }
 
 // Created for every source buffer passed by host.
@@ -120,7 +122,8 @@ enum LoadScriptFlag
     LoadScriptFlag_isFunction = 0x20,                   // input script is in a function scope, not global code.
     LoadScriptFlag_Utf8Source = 0x40,                   // input buffer is utf8 encoded.
     LoadScriptFlag_LibraryCode = 0x80,                  // for debugger, indicating 'not my code'
-    LoadScriptFlag_ExternalArrayBuffer = 0x100          // for ExternalArrayBuffer
+    LoadScriptFlag_ExternalArrayBuffer = 0x100,         // for ExternalArrayBuffer
+    LoadScriptFlag_CreateParserState = 0x200            // create the parser state cache while parsing.
 };
 
 #ifdef INLINE_CACHE_STATS
@@ -1093,11 +1096,11 @@ private:
         bool IsInNewFunctionMap(EvalMapString const& key, FunctionInfo **ppFuncInfo);
         void AddToNewFunctionMap(EvalMapString const& key, FunctionInfo *pFuncInfo);
 
-        SourceContextInfo * GetSourceContextInfo(DWORD_PTR hostSourceContext, IActiveScriptDataCache* profileDataCache);
+        SourceContextInfo * GetSourceContextInfo(DWORD_PTR hostSourceContext, SimpleDataCacheWrapper* dataCacheWrapper);
         SourceContextInfo * GetSourceContextInfo(uint hash);
         SourceContextInfo * CreateSourceContextInfo(uint hash, DWORD_PTR hostSourceContext);
         SourceContextInfo * CreateSourceContextInfo(DWORD_PTR hostSourceContext, char16 const * url, size_t len,
-            IActiveScriptDataCache* profileDataCache, char16 const * sourceMapUrl = nullptr, size_t sourceMapUrlLen = 0);
+            SimpleDataCacheWrapper* dataCacheWrapper, char16 const * sourceMapUrl = nullptr, size_t sourceMapUrlLen = 0);
 
 #if defined(LEAK_REPORT) || defined(CHECK_MEMORY_LEAK)
         void ClearSourceContextInfoMaps()
@@ -1274,6 +1277,30 @@ private:
             CompileScriptException * pse, Utf8SourceInfo** ppSourceInfo,
             const char16 *rootDisplayName, LoadScriptFlag loadScriptFlag,
             Js::Var scriptSource = nullptr);
+
+        JavascriptFunction* LoadScriptInternal(Parser* parser,
+            const byte* script, size_t cb,
+            SRCINFO const * pSrcInfo,
+            CompileScriptException * pse, Utf8SourceInfo** ppSourceInfo,
+            const char16 *rootDisplayName, LoadScriptFlag loadScriptFlag,
+            Js::Var scriptSource = nullptr);
+
+        HRESULT SerializeParserState(const byte* script, size_t cb,
+            SRCINFO const * pSrcInfo,
+            CompileScriptException * pse, Utf8SourceInfo** ppSourceInfo,
+            const char16 *rootDisplayName, LoadScriptFlag loadScriptFlag,
+            byte** buffer, DWORD* bufferSize, ArenaAllocator* alloc,
+            JavascriptFunction** function = nullptr,
+            Js::Var scriptSource = nullptr);
+
+        void MakeUtf8SourceInfo(const byte* script,
+            size_t cb,
+            SRCINFO const * pSrcInfo,
+            Utf8SourceInfo** ppSourceInfo,
+            LoadScriptFlag loadScriptFlag,
+            Js::Var scriptSource);
+
+        ULONG GetParseFlags(LoadScriptFlag loadScriptFlag, Utf8SourceInfo* pSourceInfo, SourceContextInfo* sourceContextInfo);
 
         ArenaAllocator* GeneralAllocator() { return &generalAllocator; }
 

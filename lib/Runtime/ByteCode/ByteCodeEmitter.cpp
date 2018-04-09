@@ -2772,7 +2772,7 @@ void ByteCodeGenerator::EmitOneFunction(ParseNodeFnc *pnodeFnc)
     {
         if (!PHASE_OFF1(Js::SkipNestedDeferredPhase))
         {
-            deferParseFunction->BuildDeferredStubs(funcInfo->root);
+            deferParseFunction->SetDeferredStubs(funcInfo->root->deferredStub);
         }
         Assert(!deferParseFunction->IsFunctionBody() || deferParseFunction->GetFunctionBody()->GetByteCode() != nullptr);
         return;
@@ -3194,6 +3194,11 @@ void ByteCodeGenerator::EmitOneFunction(ParseNodeFnc *pnodeFnc)
 #else
         m_writer.End();
 #endif
+
+        if (pnodeFnc->deferredStub != nullptr)
+        {
+            byteCodeFunction->SetDeferredStubs(pnodeFnc->deferredStub);
+        }
     }
     catch (...)
     {

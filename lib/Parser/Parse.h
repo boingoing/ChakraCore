@@ -36,8 +36,7 @@ enum
 enum ParseType
 {
     ParseType_Upfront,
-    ParseType_Deferred,
-    ParseType_StateCache
+    ParseType_Deferred
 };
 
 enum DestructuringInitializerContext
@@ -94,6 +93,18 @@ struct ParseContext
     bool isUtf8;
 };
 
+struct DeferredFunctionStub
+{
+    Field(RestorePoint) restorePoint;
+    Field(FncFlags) fncFlags;
+    Field(uint) nestedCount;
+    Field(charcount_t) ichMin;
+    Field(uint) capturedNameCount;
+    Field(int *) capturedNameSerializedIds;
+    Field(IdentPtrSet *) capturedNamePointers; // allocated in Parser arena
+    Field(DeferredFunctionStub *) deferredStubs;
+};
+
 template <bool nullTerminated> class UTF8EncodingPolicyBase;
 typedef UTF8EncodingPolicyBase<false> NotNullTerminatedUTF8EncodingPolicy;
 template <typename T> class Scanner;
@@ -144,6 +155,7 @@ public:
     BOOL DeferredParse(Js::LocalFunctionId functionId);
     BOOL IsDeferredFnc();
     void ReduceDeferredScriptLength(size_t chars);
+    static DeferredFunctionStub * BuildDeferredStubTree(ParseNodeFnc *pnodeFnc, Recycler *recycler);
 
     void RestorePidRefForSym(Symbol *sym);
 
@@ -320,8 +332,6 @@ public:
                 return _u("Upfront");
             case ParseType_Deferred:
                 return _u("Deferred");
-            case ParseType_StateCache:
-                return _u("StateCache");
         }
         Assert(false);
         return NULL;
