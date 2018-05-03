@@ -20,9 +20,10 @@ namespace Js
         SimpleDataCacheWrapper(IActiveScriptDataCache* dataCache);
         ~SimpleDataCacheWrapper() { this->Close(); }
 
-        ULONG BytesWrittenInBlock() { return this->bytesWrittenInBlock; }
-
         bool StartBlock(_In_ BlockType blockType, _In_ ULONG byteCount);
+        ULONG BytesWrittenInBlock() { return this->bytesWrittenInBlock; }
+        bool HasBlock(_In_ BlockType blockType);
+
         bool Close();
 
         HRESULT GetReadStream(_Out_ IStream** readStream);

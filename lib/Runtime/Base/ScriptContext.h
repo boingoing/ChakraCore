@@ -1289,6 +1289,20 @@ private:
             const char16 *rootDisplayName, LoadScriptFlag loadScriptFlag,
             Js::Var scriptSource = nullptr);
 
+        bool TryDeserializeParserState(
+            _In_ ULONG grfscr,
+            _In_ SRCINFO *srcInfo,
+            _In_ uint sourceIndex,
+            _In_ NativeModule* nativeModule,
+            __deref_out Js::ParseableFunctionInfo ** func,
+            _In_ Js::SimpleDataCacheWrapper* pDataCache);
+
+        bool TrySerializeParserState(
+            _In_ LPCUTF8 pszSrc,
+            _In_ size_t cbLength,
+            _In_ Js::ParseableFunctionInfo* func,
+            _In_ Js::SimpleDataCacheWrapper* pDataCache);
+
         HRESULT CompileUTF8Core(
             __in Js::Utf8SourceInfo* utf8SourceInfo,
             __in SRCINFO *srcInfo,

@@ -152,6 +152,19 @@ namespace Js
         return ReadHeader(*readStream) ? S_OK : E_FAIL;
     }
 
+    bool SimpleDataCacheWrapper::HasBlock(_In_ BlockType blockType)
+    {
+        AutoCOMPtr<IStream> readStream;
+        HRESULT hr = this->GetReadStream(&readStream);
+
+        if (FAILED(hr))
+        {
+            return false;
+        }
+
+        return this->SeekReadStreamToBlock(readStream, blockType);
+    }
+
     bool SimpleDataCacheWrapper::SeekReadStreamToBlock(_In_ IStream* readStream, _In_ BlockType blockType, _Out_opt_ ULONG* bytesInBlock)
     {
         Assert(readStream != nullptr);

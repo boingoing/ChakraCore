@@ -2096,6 +2096,114 @@ namespace Js
         return parseTree;
     }
 
+    bool ScriptContext::TryDeserializeParserState(
+        _In_ ULONG grfscr,
+        _In_ SRCINFO *srcInfo,
+        _In_ uint sourceIndex,
+        _In_ NativeModule* nativeModule,
+        __deref_out Js::ParseableFunctionInfo ** func,
+        _In_ Js::SimpleDataCacheWrapper* pDataCache)
+    {
+        Assert(pDataCache != nullptr);
+        Assert(func != nullptr);
+
+        *func = nullptr;
+
+        AutoCOMPtr<IStream> readStream;
+        HRESULT hr = pDataCache->GetReadStream(&readStream);
+
+        if (FAILED(hr))
+        {
+            return false;
+        }
+
+        Assert(readStream != nullptr);
+
+        // Find the parser state block in the read stream and get the size of the block in bytes.
+        ULONG byteCount = 0;
+        if (!pDataCache->SeekReadStreamToBlock(readStream, SimpleDataCacheWrapper::BlockType_ParserState, &byteCount))
+        {
+            return false;
+        }
+
+        // The contract for this bytecode buffer is that it is available as long as we have this ScriptContext.
+        // We will use this buffer as the string table needed to back the deferred stubs as well as bytecode
+        // for defer deserialized functions.
+        // TODO: This, better.
+        ArenaAllocator* alloc = this->SourceCodeAllocator();
+        byte* buffer = AnewArray(alloc, byte, byteCount);
+
+        if (buffer == nullptr)
+        {
+            return false;
+        }
+
+        if (!pDataCache->ReadArray(readStream, buffer, byteCount))
+        {
+            return false;
+        }
+
+        FunctionBody* functionBody = nullptr;
+        hr = Js::ByteCodeSerializer::DeserializeFromBuffer(this, grfscr, (ISourceHolder*) nullptr, srcInfo, buffer, nativeModule, &functionBody, sourceIndex);
+
+        if (FAILED(hr))
+        {
+            return false;
+        }
+
+        *func = functionBody->GetParseableFunctionInfo();
+
+        return true;
+    }
+
+    template <class T>
+    class AutoCoTaskMemFreePtr
+    {
+    private:
+        T ptr;
+
+    public:
+        AutoCoTaskMemFreePtr(T ptr) : ptr(ptr) { }
+        ~AutoCoTaskMemFreePtr() { CoTaskMemFree(this->ptr); this->ptr = nullptr; }
+    };
+
+    bool ScriptContext::TrySerializeParserState(
+        _In_ LPCUTF8 pszSrc,
+        _In_ size_t cbLength,
+        _In_ Js::ParseableFunctionInfo* func,
+        _In_ Js::SimpleDataCacheWrapper* pDataCache)
+    {
+        Assert(func != nullptr);
+
+        HRESULT hr = E_FAIL;
+        byte* parserStateCacheBuffer = nullptr;
+        DWORD parserStateCacheSize = 0;
+        DWORD dwFlags = GENERATE_BYTE_CODE_PARSER_STATE;
+
+        BEGIN_TEMP_ALLOCATOR(tempAllocator, this, _u("ByteCodeSerializer"));
+        hr = Js::ByteCodeSerializer::SerializeToBuffer(this,
+            tempAllocator, (DWORD)cbLength, pszSrc, func->GetFunctionBody(),
+            func->GetHostSrcInfo(), true, &parserStateCacheBuffer,
+            &parserStateCacheSize, dwFlags);
+        END_TEMP_ALLOCATOR(tempAllocator, this);
+
+        if (FAILED(hr))
+        {
+            return false;
+        }
+
+        // The parser state cache buffer was allocated by CoTaskMemAlloc.
+        // TODO: Keep this buffer around for the PLT1 scenario by deserializing it and storing a cache.
+        AutoCoTaskMemFreePtr<byte*> autoFreeBytes(parserStateCacheBuffer);
+
+        if (!pDataCache->StartBlock(Js::SimpleDataCacheWrapper::BlockType_ParserState, parserStateCacheSize))
+        {
+            return false;
+        }
+
+        return pDataCache->WriteArray(parserStateCacheBuffer, parserStateCacheSize);
+    }
+
     HRESULT ScriptContext::CompileUTF8Core(
         __in Js::Utf8SourceInfo* utf8SourceInfo,
         __in SRCINFO *srcInfo,
@@ -2115,68 +2223,59 @@ namespace Js
         Parser ps(this);
         (*func) = nullptr;
 
+        bool isCesu8 = !fOriginalUTF8Code;
         ParseNodeProg * parseTree = nullptr;
         SourceContextInfo * sourceContextInfo = srcInfo->sourceContextInfo;
         bool fUseParserStateCache = ((grfscr & fscrCreateParserState) == fscrCreateParserState)
             && CONFIG_FLAG(ParserStateCache)
             && pDataCache != nullptr;
 
-        if (fOriginalUTF8Code)
+        if (fUseParserStateCache && pDataCache->HasBlock(SimpleDataCacheWrapper::BlockType_ParserState))
         {
-            hr = ps.ParseUtf8Source(&parseTree, pszSrc, cbLength, grfscr, pse, &sourceContextInfo->nextLocalFunctionId,
-                sourceContextInfo);
-            cchLength = ps.GetSourceIchLim();
-
-            // Correcting total number of characters.
-            utf8SourceInfo->SetCchLength(cchLength);
-        }
-        else
-        {
-            hr = ps.ParseCesu8Source(&parseTree, pszSrc, cbLength, grfscr, pse, &sourceContextInfo->nextLocalFunctionId,
-                sourceContextInfo);
-        }
-        utf8SourceInfo->SetParseFlags(grfscr);
-        srcLength = ps.GetSourceLength();
-
-        if (SUCCEEDED(hr))
-        {
-            bool isCesu8 = !fOriginalUTF8Code;
+            // TODO?
+            //srcLength = ps.GetSourceLength();
+            utf8SourceInfo->SetParseFlags(grfscr);
             sourceIndex = this->SaveSourceNoCopy(utf8SourceInfo, cchLength, isCesu8);
-            hr = GenerateByteCode(parseTree, grfscr, this, func, sourceIndex, this->IsForceNoNative(), &ps, pse);
             utf8SourceInfo->SetByteCodeGenerationFlags(grfscr);
 
-            // If we are supposed to create a parser state cache, do that now since we have the generated code and the parser available.
-            if (fUseParserStateCache)
+            hr = TryDeserializeParserState(grfscr, srcInfo, sourceIndex, nullptr, func, pDataCache) ? S_OK : E_FAIL;
+        }
+
+        // If hydrating the parser state cache failed, let's try to do an ordinary parse
+        if (*func == nullptr)
+        {
+            if (fOriginalUTF8Code)
             {
-                byte* parserStateCacheBuffer = nullptr;
-                DWORD parserStateCacheSize = 0;
+                hr = ps.ParseUtf8Source(&parseTree, pszSrc, cbLength, grfscr, pse, &sourceContextInfo->nextLocalFunctionId,
+                    sourceContextInfo);
+                cchLength = ps.GetSourceIchLim();
 
-                if (SUCCEEDED(hr))
-                {
-                    DWORD dwFlags = GENERATE_BYTE_CODE_PARSER_STATE;
-                    Js::FunctionBody* functionBody = (*func)->GetFunctionBody();
+                // Correcting total number of characters.
+                utf8SourceInfo->SetCchLength(cchLength);
+            }
+            else
+            {
+                hr = ps.ParseCesu8Source(&parseTree, pszSrc, cbLength, grfscr, pse, &sourceContextInfo->nextLocalFunctionId,
+                    sourceContextInfo);
+            }
+            
+            utf8SourceInfo->SetParseFlags(grfscr);
+            srcLength = ps.GetSourceLength();
 
-                    BEGIN_TEMP_ALLOCATOR(tempAllocator, this, _u("ByteCodeSerializer"));
-                    hr = Js::ByteCodeSerializer::SerializeToBuffer(this,
-                        tempAllocator, (DWORD)cbLength, pszSrc, functionBody,
-                        functionBody->GetHostSrcInfo(), true, &parserStateCacheBuffer,
-                        &parserStateCacheSize, dwFlags);
-                    END_TEMP_ALLOCATOR(tempAllocator, this);
-                }
-
-                if (SUCCEEDED(hr))
-                {
-                    if (pDataCache->StartBlock(Js::SimpleDataCacheWrapper::BlockType_ParserState, parserStateCacheSize))
-                    {
-                        pDataCache->WriteArray(parserStateCacheBuffer, parserStateCacheSize);
-                    }
-
-                    // The parser state cache buffer was allocated by CoTaskMemAlloc.
-                    // TODO: Keep this buffer around for the PLT1 scenario by deserializing it and storing a cache.
-                    CoTaskMemFree(parserStateCacheBuffer);
-                }
+            if (SUCCEEDED(hr))
+            {
+                sourceIndex = this->SaveSourceNoCopy(utf8SourceInfo, cchLength, isCesu8);
+                hr = GenerateByteCode(parseTree, grfscr, this, func, sourceIndex, this->IsForceNoNative(), &ps, pse);
+                utf8SourceInfo->SetByteCodeGenerationFlags(grfscr);
             }
         }
+
+        // If we are supposed to create a parser state cache, do that now since we have the generated code and the parser available.
+        if (SUCCEEDED(hr) && fUseParserStateCache && *func != nullptr)
+        {
+            TrySerializeParserState(pszSrc, cbLength, *func, pDataCache);
+        }
+
 #ifdef ENABLE_SCRIPT_DEBUGGING
         else if (this->IsScriptContextInDebugMode() && !utf8SourceInfo->GetIsLibraryCode() && !utf8SourceInfo->IsInDebugMode())
         {
