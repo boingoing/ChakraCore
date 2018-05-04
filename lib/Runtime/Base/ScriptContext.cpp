@@ -1922,11 +1922,6 @@ namespace Js
         LoadScriptFlag loadScriptFlag,
         Js::Var scriptSource)
     {
-        if (pSrcInfo == nullptr)
-        {
-            pSrcInfo = this->Cache()->noContextGlobalSourceInfo;
-        }
-
         LPUTF8 utf8Script = nullptr;
         size_t length = cb;
         size_t cbNeeded = 0;
@@ -2050,6 +2045,11 @@ namespace Js
         uint* sourceIndex,
         Js::Var scriptSource)
     {
+        if (pSrcInfo == nullptr)
+        {
+            pSrcInfo = this->Cache()->noContextGlobalSourceInfo;
+        }
+
         MakeUtf8SourceInfo(script, cb, pSrcInfo, ppSourceInfo, loadScriptFlag, scriptSource);
 
         //
