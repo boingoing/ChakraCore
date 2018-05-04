@@ -2577,10 +2577,10 @@ public:
 
     const byte * ReadCharCount(const byte * buffer, size_t remainingBytes, charcount_t * value)
     {
-        Assert(remainingBytes>=sizeof(charcount_t));
 #if VARIABLE_INT_ENCODING
         return ReadVariableInt<charcount_t>(buffer, remainingBytes, value);
 #else
+        Assert(remainingBytes >= sizeof(charcount_t));
         *value = *(charcount_t *) buffer;
         return buffer + sizeof(charcount_t);
 #endif
