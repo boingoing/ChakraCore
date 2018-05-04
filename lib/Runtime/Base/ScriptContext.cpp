@@ -2228,7 +2228,8 @@ namespace Js
         SourceContextInfo * sourceContextInfo = srcInfo->sourceContextInfo;
         bool fUseParserStateCache = ((grfscr & fscrCreateParserState) == fscrCreateParserState)
             && CONFIG_FLAG(ParserStateCache)
-            && pDataCache != nullptr;
+            && pDataCache != nullptr
+            && !this->IsScriptContextInDebugMode();
 
         if (fUseParserStateCache && pDataCache->HasBlock(SimpleDataCacheWrapper::BlockType_ParserState))
         {
